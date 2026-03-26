@@ -177,8 +177,8 @@ FIGURE_SIZES = {
 }
 
 DEFAULTS = {
-    'input_dir': "/hpc/projects/arias_group/Vincent_Turon-Lagot/Imaging_Experiments/20260321_A549_OFFON18_OFFON20_48hrs_dragonfly/Image_analysis/1-nuclear_analysis/nuclear_analysis_output_ultrack",
-    'output_dir': "/hpc/projects/arias_group/Vincent_Turon-Lagot/Imaging_Experiments/20260321_A549_OFFON18_OFFON20_48hrs_dragonfly/Image_analysis/2-mNG_trajectories_analysis/output",
+    'input_dir': "/path/to/your/output/1-nuclear_analysis",
+    'output_dir': "/path/to/your/output/2-trajectories",
     'well': 'B3',
     'threshold': 40,
     'min_duration': 30,

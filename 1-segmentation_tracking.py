@@ -15,8 +15,8 @@ from ultrack import MainConfig, Tracker
 from ultrack.utils import labels_to_contours
 
 # ==================== CONFIGURATION ====================
-ZARR_PATH = "/hpc/projects/arias_group/Vincent_Turon-Lagot/Imaging_Experiments/20260321_A549_OFFON18_OFFON20_48hrs_dragonfly/2-register/20260321_A549_OFFON18_OFFON20_48hrs_dragonfly_registered.zarr"
-OUTPUT_DIR = Path("/hpc/projects/arias_group/Vincent_Turon-Lagot/Imaging_Experiments/20260321_A549_OFFON18_OFFON20_48hrs_dragonfly/Image_analysis/1-nuclear_analysis/nuclear_analysis_output_ultrack")
+ZARR_PATH = "/path/to/your/data.zarr"
+OUTPUT_DIR = Path("/path/to/your/output/1-nuclear_analysis")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Channel indices

@@ -14,7 +14,7 @@ import argparse
 from pathlib import Path
 
 # ---- same constants as the main script ----
-ZARR_PATH = "/hpc/projects/arias_group/Vincent_Turon-Lagot/Imaging_Experiments/20260321_A549_OFFON18_OFFON20_48hrs_dragonfly/2-register/20260321_A549_OFFON18_OFFON20_48hrs_dragonfly_registered.zarr"
+ZARR_PATH = "/path/to/your/data.zarr"
 ROWS  = ['B', 'C']
 WELLS = ['1', '2', '3']
 # -------------------------------------------

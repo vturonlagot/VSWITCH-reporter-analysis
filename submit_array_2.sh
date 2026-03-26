@@ -24,7 +24,7 @@ PARTITION="cpu"          # CPU partition (no GPU needed)
 CPUS=4
 MEM="32G"
 TIME="02:00:00"
-CONDA_ENV="/hpc/mydata/vincent.turon-lagot/conda_env/imageprocessing"
+CONDA_ENV="/path/to/your/conda_env"
 
 # ---- script 2 arguments (passed through to every job) ----
 EXTRA_ARGS="--n-sd 10"    # stdev threshold (already the default, but explicit here)

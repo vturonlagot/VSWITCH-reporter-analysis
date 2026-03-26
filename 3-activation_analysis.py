@@ -292,9 +292,9 @@ def _pairwise_sig_brackets(ax, data_list, positions=None, labels=None, bonferron
 
 
 DEFAULTS = {
-    'analysis_dir': "/hpc/projects/arias_group/Vincent_Turon-Lagot/Imaging_Experiments/20260321_A549_OFFON18_OFFON20_48hrs_dragonfly/Image_analysis/2-mNG_trajectories_analysis/output",
-    'tracking_dir': "/hpc/projects/arias_group/Vincent_Turon-Lagot/Imaging_Experiments/20260321_A549_OFFON18_OFFON20_48hrs_dragonfly/Image_analysis/1-nuclear_analysis/nuclear_analysis_output_ultrack",
-    'output_dir': "/hpc/projects/arias_group/Vincent_Turon-Lagot/Imaging_Experiments/20260321_A549_OFFON18_OFFON20_48hrs_dragonfly/Image_analysis/3-reporter_activation_group_analysis",
+    'analysis_dir': "/path/to/your/output/2-trajectories",
+    'tracking_dir': "/path/to/your/output/1-nuclear_analysis",
+    'output_dir': "/path/to/your/output/3-activation_analysis",
     'well': 'B2',
     'early_min': 6, 'early_max': 13,
     'average_min': 15, 'average_max': 27,

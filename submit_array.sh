@@ -22,7 +22,7 @@ GRES="gpu:1"             # GPU resource (e.g. gpu:a100:1 if you need a specific 
 CPUS=4                   # CPUs per task (matches n_workers in ultrack config)
 MEM="32G"                # RAM per task
 TIME="08:00:00"          # wall-clock limit per FOV
-CONDA_ENV="/hpc/mydata/vincent.turon-lagot/conda_env/imageprocessing"
+CONDA_ENV="/path/to/your/conda_env"
 MAX_PARALLEL=8           # max simultaneously running array tasks (%N in --array)
 
 DRY_RUN=false
