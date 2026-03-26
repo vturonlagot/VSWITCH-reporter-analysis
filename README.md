@@ -2,8 +2,6 @@
 
 Image analysis and single-cell quantification pipeline for the split-mNG OFFON reporter system, used to measure viral protease activity at single-cell resolution by live fluorescence microscopy.
 
-Associated publication: **[TITLE]** — [Authors] — *[Journal]*, [Year]. DOI: [DOI]
-
 ---
 
 ## Overview
@@ -95,5 +93,6 @@ MIT License. See `LICENSE` for details.
 
 ## Contact
 
-[Your name] — [your email or ORCID]
-[Lab name], [Institution]
+Vincent Turon-Lagot - https://orcid.org/0000-0003-2983-0684
+
+Arias Lab, Biohub SF
