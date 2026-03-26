@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# SLURM logs and intermediate outputs
+slurm_logs/
+*.log
+*.err
+*.out
+
+# Figure output folders (large, reproducible)
+script2_figures_from_old_exp/
+script3_figures_from_old_exp/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# Data files (too large; host separately)
+*.zarr
+*.tif
+*.tiff
+*.h5
+*.hdf5
+*.csv
+*.xlsx
+*.xls

@@ -1,0 +1,18 @@
+# Core scientific stack
+numpy
+pandas
+scipy
+matplotlib
+scikit-image
+scikit-learn
+tqdm
+zarr
+
+# Segmentation
+cellpose
+
+# Tracking
+ultrack
+
+# Visualization (script 1 only — can be omitted for headless HPC runs)
+napari
