@@ -1,6 +1,6 @@
 # OFFON Reporter Analysis Pipeline
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19242126.svg)](https://doi.org/10.5281/zenodo.19242126)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19463387.svg)](https://doi.org/10.5281/zenodo.19463387)
 
 Image analysis and single-cell quantification pipeline for the split-mNG OFFON reporter system, used to measure viral protease activity at single-cell resolution by live fluorescence microscopy.
 
