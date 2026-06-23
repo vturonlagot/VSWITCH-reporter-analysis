@@ -12,9 +12,9 @@ The pipeline processes multi-dimensional fluorescence microscopy images (zarr fo
 
 | Script | Purpose |
 |--------|---------|
-| `1-OFFON_reporter_image_analysis_ultrack_vTEST.py` | Nuclear segmentation (Cellpose) and single-cell tracking (ultrack) |
-| `2-OFFON_reporter_GFP_trajectories_analysis_ultrack_TEST.py` | Extraction and normalization of mNG and BFP fluorescence trajectories |
-| `3-OFFON_reporter_activation_group_analysis_ultrack_vTEST_light.py` | Sigmoid fitting, activation detection, and response group classification |
+| `1-segmentation_tracking.py` | Nuclear segmentation (Cellpose) and single-cell tracking (ultrack) |
+| `2-trajectory_extraction.py` | Extraction and normalization of mNG and BFP fluorescence trajectories |
+| `3-activation_analysis.py` | Sigmoid fitting, activation detection, and response group classification |
 
 The reporter uses a split-mNG system in which reconstitution of mNG fluorescence reports on viral protease activity. The mNG/BFP ratio is used to normalize for cell-to-cell variation in reporter expression.
 
@@ -39,7 +39,7 @@ Processes a single field of view (FOV). Designed to be run as a SLURM array job.
 
 ```bash
 # Single FOV
-python 1-OFFON_reporter_image_analysis_ultrack_vTEST.py \
+python 1-segmentation_tracking.py \
     --zarr-path /path/to/data.zarr \
     --row <row> --well <well> --fov <fov> \
     --output-dir /path/to/output/
@@ -50,7 +50,7 @@ bash submit_array.sh
 
 ### Script 2 — Trajectory extraction
 ```bash
-python 2-OFFON_reporter_GFP_trajectories_analysis_ultrack_TEST.py \
+python 2-trajectory_extraction.py \
     --input-dir /path/to/script1/output/ \
     --zarr-path /path/to/data.zarr \
     --output-dir /path/to/script2/output/
@@ -58,7 +58,7 @@ python 2-OFFON_reporter_GFP_trajectories_analysis_ultrack_TEST.py \
 
 ### Script 3 — Activation analysis and figures
 ```bash
-python 3-OFFON_reporter_activation_group_analysis_ultrack_vTEST_light.py \
+python 3-activation_analysis.py \
     --input-dir /path/to/script2/output/ \
     --output-dir /path/to/script3/output/
 ```
