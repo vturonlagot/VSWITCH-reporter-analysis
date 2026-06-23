@@ -13,7 +13,7 @@ set -euo pipefail
 
 # ---- paths ----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAIN_SCRIPT="$SCRIPT_DIR/2-OFFON_reporter_GFP_trajectories_analysis_ultrack_TEST.py"
+MAIN_SCRIPT="$SCRIPT_DIR/2-trajectory_extraction.py"
 LOG_DIR="$SCRIPT_DIR/slurm_logs_2"
 
 # ---- wells to process ----

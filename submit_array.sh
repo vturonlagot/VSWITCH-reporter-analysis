@@ -11,7 +11,7 @@ set -euo pipefail
 
 # ---- paths (edit if needed) ----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAIN_SCRIPT="$SCRIPT_DIR/1-OFFON_reporter_image_analysis_ultrack_vTEST.py"
+MAIN_SCRIPT="$SCRIPT_DIR/1-segmentation_tracking.py"
 GEN_SCRIPT="$SCRIPT_DIR/generate_fov_list.py"
 FOV_LIST="$SCRIPT_DIR/fov_list.txt"
 LOG_DIR="$SCRIPT_DIR/slurm_logs"

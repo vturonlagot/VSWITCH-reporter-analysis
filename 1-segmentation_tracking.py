@@ -1,4 +1,5 @@
-import napari
+# napari is imported lazily (only when the interactive viewer is actually
+# used) so that headless / HPC SLURM runs do not require it to be installed.
 import zarr
 import numpy as np
 from cellpose import models
@@ -15,18 +16,22 @@ from ultrack import MainConfig, Tracker
 from ultrack.utils import labels_to_contours
 
 # ==================== CONFIGURATION ====================
+# These are defaults only. They can be overridden at runtime with
+# --zarr-path and --output-dir (see the argument parser at the bottom).
+# The output directory is created in __main__, not at import time.
 ZARR_PATH = "/path/to/your/data.zarr"
 OUTPUT_DIR = Path("/path/to/your/output/1-nuclear_analysis")
-OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Channel indices
 PHASE_CHANNEL_IDX = 0
 DAPI_CHANNEL_IDX = 2
 GFP_CHANNEL_IDX = 1
 
-# Rows, Wells and FOVs (FOVs are auto-detected from the zarr store)
-ROWS  = ['B']
-WELLS = ['3', '4']
+# Rows, Wells and FOVs (used only by the local "process all wells" batch path).
+# Set to None to auto-detect everything present in the zarr store, or restrict
+# to a subset with an explicit list, e.g. ROWS = ['B', 'C'], WELLS = ['1', '2'].
+ROWS  = None   # None = auto-detect all rows from the zarr store
+WELLS = None   # None = auto-detect all wells under each row
 
 # Cellpose parameters for 2D
 CELLPOSE_MODEL = 'nuclei'
@@ -70,6 +75,19 @@ ASSESS_FLOW_THRESHOLDS = [0.3, 0.4, 0.6]
 ASSESS_TIMEPOINTS      = [0, 48, -1]  # timepoints to sweep: 0 = first, -1 = last (mid = e.g. 48)
 
 # ==================== HELPER FUNCTIONS ====================
+
+def get_rows(zarr_store):
+    """Return sorted list of row keys present in the zarr store (auto-detected)."""
+    return sorted([k for k in zarr_store.keys() if not k.startswith('.')])
+
+
+def get_wells(zarr_store, row):
+    """Return sorted list of well keys under a given row (auto-detected)."""
+    try:
+        return sorted([k for k in zarr_store[row].keys() if not k.startswith('.')])
+    except KeyError:
+        return []
+
 
 def get_fovs(zarr_store, row, well):
     """Return sorted list of available FOV indices for a given row/well."""
@@ -712,7 +730,18 @@ if __name__ == "__main__":
     parser.add_argument('--row',  default=None, help="Row letter (e.g. B)")
     parser.add_argument('--well', default=None, help="Well number (e.g. 3)")
     parser.add_argument('--fov',  type=int, default=None, help="FOV index")
+    parser.add_argument('--zarr-path', default=None,
+                        help="Path to the input zarr store (overrides ZARR_PATH constant)")
+    parser.add_argument('--output-dir', default=None,
+                        help="Output directory (overrides OUTPUT_DIR constant)")
     args = parser.parse_args()
+
+    # CLI args override the config constants at the top of the file
+    if args.zarr_path is not None:
+        ZARR_PATH = args.zarr_path
+    if args.output_dir is not None:
+        OUTPUT_DIR = Path(args.output_dir)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # Single-FOV mode: CLI args override config constants
     SINGLE_FOV_MODE = args.fov is not None
@@ -776,6 +805,7 @@ if __name__ == "__main__":
         )
 
         print("\nOpening napari...")
+        import napari  # imported here so headless runs never need it
         viewer = napari.Viewer()
 
         viewer.add_image(dapi_mips, name='DAPI MIP', colormap='blue', blending='additive',
@@ -791,8 +821,10 @@ if __name__ == "__main__":
         all_measurements = []
         all_stats = []
 
-        for row in ROWS:
-            for well in WELLS:
+        rows = ROWS if ROWS is not None else get_rows(zarr_store)
+        for row in rows:
+            wells = WELLS if WELLS is not None else get_wells(zarr_store, row)
+            for well in wells:
                 fovs = get_fovs(zarr_store, row, well)
                 if not fovs:
                     print(f"  Skipping {row}{well} — no FOVs found in zarr store")

@@ -42,28 +42,46 @@ Processes a single field of view (FOV). Designed to be run as a SLURM array job.
 python 1-segmentation_tracking.py \
     --zarr-path /path/to/data.zarr \
     --row <row> --well <well> --fov <fov> \
-    --output-dir /path/to/output/
+    --output-dir /path/to/script1/output/
 
-# Submit as SLURM array (edit paths inside submit_array.sh first)
+# Submit as SLURM array (edit the paths and SLURM settings inside
+# submit_array.sh, and ZARR_PATH/OUTPUT_DIR inside 1-segmentation_tracking.py, first)
 bash submit_array.sh
 ```
 
+Rows, wells, and FOVs are auto-detected from the zarr store. `generate_fov_list.py`
+walks the store automatically; pass `--rows`/`--wells` to restrict to a subset.
+The local batch path in script 1 auto-detects too (set the `ROWS`/`WELLS`
+constants to a list only if you want to process a subset).
+
+Channel indices for script 1 are set with the `PHASE_CHANNEL_IDX`,
+`DAPI_CHANNEL_IDX`, and `GFP_CHANNEL_IDX` constants at the top of the file.
+
 ### Script 2 — Trajectory extraction
+Reads the per-FOV tracking output from script 1.
+
 ```bash
 python 2-trajectory_extraction.py \
-    --input-dir /path/to/script1/output/ \
-    --zarr-path /path/to/data.zarr \
-    --output-dir /path/to/script2/output/
+    --input /path/to/script1/output/ \
+    --output /path/to/script2/output/ \
+    --well all          # 'all' auto-detects wells from script 1's output; or list them: B1 B2 C1
 ```
 
 ### Script 3 — Activation analysis and figures
+Reads the trajectory output from script 2 (`--analysis-dir`) and the
+tracking output from script 1 (`--tracking-dir`).
+
 ```bash
 python 3-activation_analysis.py \
-    --input-dir /path/to/script2/output/ \
-    --output-dir /path/to/script3/output/
+    --analysis-dir /path/to/script2/output/ \
+    --tracking-dir /path/to/script1/output/ \
+    --output-dir /path/to/script3/output/ \
+    --well all          # 'all' auto-detects wells; or list them: B1 B2 C1
 ```
 
-Run any script with `--help` for the full list of options.
+Paths also have defaults defined in each script's `DEFAULTS` block / config
+constants, so the flags above are optional once those are edited. Run any
+script with `--help` for the full list of options.
 
 ---
 
@@ -75,7 +93,10 @@ Input images are expected as a zarr store with the layout:
 store[row][well][fov]['0']  →  shape (T, C, Z, Y, X)
 ```
 
-Channel order is specified via `--mng-channel` and `--bfp-channel` arguments (default: 0 and 1).
+Channel indices are configured per script: script 1 uses the
+`PHASE_CHANNEL_IDX` / `DAPI_CHANNEL_IDX` / `GFP_CHANNEL_IDX` constants at the top
+of the file, and script 3 accepts `--nucleus-channel`, `--mng-channel`, and
+`--bfp-channel` flags (run `python 3-activation_analysis.py --help` for defaults).
 
 ---
 

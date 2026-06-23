@@ -179,7 +179,7 @@ FIGURE_SIZES = {
 DEFAULTS = {
     'input_dir': "/path/to/your/output/1-nuclear_analysis",
     'output_dir': "/path/to/your/output/2-trajectories",
-    'well': 'B3',
+    'well': 'B1',
     'threshold': 40,
     'min_duration': 30,
     'sustained': True,
@@ -191,7 +191,7 @@ DEFAULTS = {
     'min_activation_timepoint': 0,
 }
 
-AVAILABLE_WELLS = ['B3', 'B4', 'C3', 'C4']
+AVAILABLE_WELLS = ['B1', 'B2', 'B3', 'C1', 'C2', 'C3']
 
 
 def parse_args():
