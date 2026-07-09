@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
-# submit_array.sh  —  SLURM array launcher for the nuclear tracking pipeline
+# submit_1-segmentation_tracking.sh  —  SLURM array launcher for the nuclear tracking pipeline
 #
 # Usage:
-#   bash submit_array.sh              # generate task list + submit
-#   bash submit_array.sh --dry-run    # generate list only, don't submit
+#   bash submit_1-segmentation_tracking.sh              # generate task list + submit
+#   bash submit_1-segmentation_tracking.sh --dry-run    # generate list only, don't submit
 # =============================================================================
 
 set -euo pipefail
@@ -12,9 +12,12 @@ set -euo pipefail
 # ---- paths (edit if needed) ----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAIN_SCRIPT="$SCRIPT_DIR/1-segmentation_tracking.py"
-GEN_SCRIPT="$SCRIPT_DIR/generate_fov_list.py"
 FOV_LIST="$SCRIPT_DIR/fov_list.txt"
 LOG_DIR="$SCRIPT_DIR/slurm_logs"
+
+# Input zarr store — set once here and passed to both the FOV generator and the
+# main script, so this is the single place to edit the dataset path.
+ZARR_PATH="/path/to/your/data.zarr"
 
 # ---- SLURM resource settings (adjust for your cluster) ----
 PARTITION="gpu"          # partition/queue name
@@ -22,7 +25,7 @@ GRES="gpu:1"             # GPU resource (e.g. gpu:a100:1 if you need a specific 
 CPUS=4                   # CPUs per task (matches n_workers in ultrack config)
 MEM="32G"                # RAM per task
 TIME="08:00:00"          # wall-clock limit per FOV
-CONDA_ENV="/path/to/your/conda_env"
+CONDA_ENV="vswitch_analysis"
 MAX_PARALLEL=8           # max simultaneously running array tasks (%N in --array)
 
 DRY_RUN=false
@@ -30,10 +33,17 @@ if [[ "${1:-}" == "--dry-run" ]]; then
     DRY_RUN=true
 fi
 
+# ---- Activate the conda environment ----
+# Self-contained: the launch node also needs the env for the FOV-listing step
+# below. Batch jobs don't inherit conda from the interactive shell, so load it.
+module load anaconda
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$CONDA_ENV"
+
 # ---- Step 1: generate FOV list ----
 echo "Generating FOV list..."
 mkdir -p "$LOG_DIR"
-python "$GEN_SCRIPT" --out "$FOV_LIST"
+python "$MAIN_SCRIPT" --list-fovs --out "$FOV_LIST" --zarr-path "$ZARR_PATH"
 
 N_TASKS=$(wc -l < "$FOV_LIST")
 if [[ "$N_TASKS" -eq 0 ]]; then
@@ -67,6 +77,8 @@ sbatch <<EOF
 #SBATCH --error=${LOG_DIR}/job_%A_task_%a.err
 
 # Activate environment
+# Batch jobs don't inherit conda from the interactive shell, so load it first.
+module load anaconda
 source "\$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
 
@@ -88,7 +100,7 @@ fi
 echo "Task \${SLURM_ARRAY_TASK_ID}: row=\${ROW} well=\${WELL} fov=\${FOV}"
 echo "Node: \$(hostname)  GPU: \$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
 
-python "${MAIN_SCRIPT}" --row "\${ROW}" --well "\${WELL}" --fov "\${FOV}"
+python "${MAIN_SCRIPT}" --row "\${ROW}" --well "\${WELL}" --fov "\${FOV}" --zarr-path "${ZARR_PATH}"
 EOF
 
 echo "Submitted ${N_TASKS} tasks (max ${MAX_PARALLEL} running at once)."

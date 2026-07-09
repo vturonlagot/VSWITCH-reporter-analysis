@@ -27,12 +27,6 @@ PHASE_CHANNEL_IDX = 0
 DAPI_CHANNEL_IDX = 2
 GFP_CHANNEL_IDX = 1
 
-# Rows, Wells and FOVs (used only by the local "process all wells" batch path).
-# Set to None to auto-detect everything present in the zarr store, or restrict
-# to a subset with an explicit list, e.g. ROWS = ['B', 'C'], WELLS = ['1', '2'].
-ROWS  = None   # None = auto-detect all rows from the zarr store
-WELLS = None   # None = auto-detect all wells under each row
-
 # Cellpose parameters for 2D
 CELLPOSE_MODEL = 'nuclei'
 DIAMETER = 100
@@ -55,24 +49,8 @@ SPLIT_MIN_DISTANCE = 10           # Minimum distance (px) between watershed seed
 #   — shape filter: segments below this circularity are excluded even after splitting
 SHAPE_CIRCULARITY_MIN = 0.3       # 0 = any shape, 1 = perfect circle; set 0 to disable
 
-# Processing options
-PROCESS_SINGLE_FOV_FIRST = False
-TEST_ROW = 'B'
-TEST_WELL = '2'
-TEST_FOV = 3
-
 # Measurement options
 MEASURE_IN_3D = True
-
-# Debug mode
-DEBUG = False
-INSPECT_CHANNELS_ONLY = False
-
-# Cellpose parameter assessment
-ASSESS_CELLPOSE = False
-ASSESS_DIAMETERS       = [70, 85, 100, 115, 130]
-ASSESS_FLOW_THRESHOLDS = [0.3, 0.4, 0.6]
-ASSESS_TIMEPOINTS      = [0, 48, -1]  # timepoints to sweep: 0 = first, -1 = last (mid = e.g. 48)
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -96,43 +74,6 @@ def get_fovs(zarr_store, row, well):
         return sorted([int(k) for k in keys if k.isdigit()])
     except KeyError:
         return []
-
-
-def inspect_channels(zarr_store, row, well, fov, output_dir):
-    """Inspect all channels to identify DAPI and GFP."""
-    from skimage.io import imsave
-    
-    print("\n" + "="*60)
-    print("CHANNEL INSPECTION")
-    print("="*60)
-    
-    data_arr = zarr_store[row][well][str(fov)]['0']
-    n_timepoints, n_channels, n_z, n_y, n_x = data_arr.shape
-    print(f"Data shape: {data_arr.shape}")
-    print(f"Number of channels: {n_channels}")
-    
-    t = 0
-    print(f"\nAnalyzing timepoint {t}:")
-    
-    for ch in range(n_channels):
-        ch_data = data_arr[t, ch, :, :, :]
-        mip = np.max(ch_data, axis=0)
-        
-        print(f"\n  Channel {ch}:")
-        print(f"    3D shape: {ch_data.shape}, dtype: {ch_data.dtype}")
-        print(f"    3D range: [{ch_data.min()}, {ch_data.max()}]")
-        print(f"    MIP range: [{mip.min()}, {mip.max()}]")
-        
-        if mip.max() > 0:
-            mip_norm = ((mip - mip.min()) / (mip.max() - mip.min() + 1e-10) * 65535).astype(np.uint16)
-        else:
-            mip_norm = mip.astype(np.uint16)
-        
-        save_path = output_dir / f"channel_{ch}_mip_t0.tif"
-        imsave(save_path, mip_norm)
-        print(f"    Saved: {save_path}")
-    
-    print("\n" + "="*60)
 
 
 def create_mip(image_3d, axis=0):
@@ -673,56 +614,6 @@ def process_fov(zarr_store, row, well, fov, model, output_dir):
     return dapi_mips, gfp_mips, tracked_masks, df_measurements
 
 
-# ==================== CELLPOSE PARAMETER ASSESSMENT ====================
-
-def assess_cellpose_params(zarr_store, row, well, fov, model, output_dir,
-                           diameters, flow_thresholds, timepoint=0):
-    """
-    Run a grid search over Cellpose diameter × flow_threshold on one timepoint.
-
-    Saves a comparison figure:  rows = flow_threshold, cols = diameter
-    Each panel shows the DAPI MIP with coloured nucleus outlines and the
-    detected nucleus count.
-    """
-    data_arr  = zarr_store[row][well][str(fov)]['0']
-    dapi_3d   = data_arr[timepoint, DAPI_CHANNEL_IDX, :, :, :]
-    dapi_mip  = create_mip(dapi_3d)
-
-    n_rows = len(flow_thresholds)
-    n_cols = len(diameters)
-    fig, axes = plt.subplots(n_rows, n_cols,
-                             figsize=(4 * n_cols, 4 * n_rows),
-                             squeeze=False)
-    fig.suptitle(f"Cellpose parameter sweep — {row}{well} FOV{fov} t={timepoint}",
-                 fontsize=14, y=1.01)
-
-    vmin = np.percentile(dapi_mip, 1)
-    vmax = np.percentile(dapi_mip, 99.5)
-
-    for ri, flow_thr in enumerate(flow_thresholds):
-        for ci, diam in enumerate(diameters):
-            masks = segment_nuclei_2d(dapi_mip, model, diam, flow_thr, CELLPOSE_THRESHOLD)
-            n_nuclei = masks.max()
-
-            ax = axes[ri][ci]
-            ax.imshow(dapi_mip, cmap='gray', vmin=vmin, vmax=vmax)
-
-            # Draw nucleus outlines
-            if masks.max() > 0:
-                ax.contour(masks, levels=np.arange(0.5, masks.max() + 1), colors='red', linewidths=0.5)
-
-            ax.set_title(f"diam={diam}  flow={flow_thr}\nn={n_nuclei}", fontsize=9)
-            ax.axis('off')
-
-    fig.tight_layout()
-    out_path = output_dir / f"cellpose_param_sweep_{row}{well}_FOV{fov}_t{timepoint}.png"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=200, bbox_inches='tight')
-    plt.close(fig)
-    print(f"\n  Saved parameter sweep → {out_path}")
-    return out_path
-
-
 # ==================== MAIN ====================
 if __name__ == "__main__":
     import argparse
@@ -734,55 +625,65 @@ if __name__ == "__main__":
                         help="Path to the input zarr store (overrides ZARR_PATH constant)")
     parser.add_argument('--output-dir', default=None,
                         help="Output directory (overrides OUTPUT_DIR constant)")
+    parser.add_argument('--list-fovs', action='store_true',
+                        help="Enumerate (row, well, fov) from the zarr store, write them "
+                             "to --out, and exit (used by submit_1-segmentation_tracking.sh). No GPU needed.")
+    parser.add_argument('--out', default=str(Path(__file__).parent / 'fov_list.txt'),
+                        help="Output path for the FOV list (with --list-fovs)")
+    parser.add_argument('--rows', nargs='+', default=None,
+                        help="With --list-fovs: restrict to these rows (default: auto-detect)")
+    parser.add_argument('--wells', nargs='+', default=None,
+                        help="With --list-fovs: restrict to these wells (default: auto-detect)")
     args = parser.parse_args()
 
     # CLI args override the config constants at the top of the file
     if args.zarr_path is not None:
         ZARR_PATH = args.zarr_path
+
+    # ---- FOV-listing mode: enumerate the store and exit (no GPU/Cellpose) ----
+    if args.list_fovs:
+        store = zarr.open(ZARR_PATH, mode='r')
+        list_rows = args.rows if args.rows is not None else get_rows(store)
+        print(f"Rows to scan: {list_rows}")
+        tasks = []
+        for row in list_rows:
+            row = row.strip()
+            wells = args.wells if args.wells is not None else get_wells(store, row)
+            for well in wells:
+                well = str(well).strip()
+                fovs = get_fovs(store, row, well)
+                if not fovs:
+                    print(f"  Skipping {row}{well} — no FOVs found in zarr store")
+                    continue
+                for fov in fovs:
+                    line = f"{row} {well} {fov}".replace('\r', '').replace('\n', '')
+                    if len(line.split()) != 3:
+                        raise ValueError(f"Malformed task line (hidden characters?): {repr(line)}")
+                    tasks.append(line)
+                    print(f"  Found: {row}/{well} FOV {fov}")
+        with open(args.out, 'w', newline='\n') as f:
+            f.write('\n'.join(tasks) + '\n')
+        print(f"\nWrote {len(tasks)} tasks to {args.out}")
+        exit()
+
     if args.output_dir is not None:
         OUTPUT_DIR = Path(args.output_dir)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Single-FOV mode: CLI args override config constants
-    SINGLE_FOV_MODE = args.fov is not None
-    if SINGLE_FOV_MODE:
-        _row  = args.row  if args.row  is not None else TEST_ROW
-        _well = args.well if args.well is not None else TEST_WELL
-        _fov  = args.fov
+    # Single-FOV mode (SLURM array path): --row, --well, --fov are required.
+    if args.row is None or args.well is None or args.fov is None:
+        parser.error("--row, --well and --fov are required (single-FOV mode). "
+                     "Use --list-fovs to enumerate the store.")
+    _row, _well, _fov = args.row, args.well, args.fov
 
     print("="*80)
     print("NUCLEAR TRACKING PIPELINE (MIP + Cellpose + Ultrack)")
-    if SINGLE_FOV_MODE:
-        print(f"  Single-FOV mode: {_row}/{_well} FOV {_fov}")
+    print(f"  Single-FOV mode: {_row}/{_well} FOV {_fov}")
     print("="*80)
 
     print("\nLoading zarr store...")
     zarr_store = zarr.open(ZARR_PATH, mode='r')
 
-    if INSPECT_CHANNELS_ONLY:
-        OUTPUT_DIR.mkdir(exist_ok=True)
-        inspect_channels(zarr_store, TEST_ROW, TEST_WELL, TEST_FOV, OUTPUT_DIR)
-        print("\nExiting after channel inspection.")
-        exit()
-
-    if ASSESS_CELLPOSE:
-        OUTPUT_DIR.mkdir(exist_ok=True)
-        print("\nInitializing Cellpose for parameter sweep...")
-        import torch
-        USE_GPU = torch.cuda.is_available()
-        model = models.CellposeModel(gpu=USE_GPU, model_type=CELLPOSE_MODEL)
-        n_timepoints = zarr_store[TEST_ROW][TEST_WELL][str(TEST_FOV)]['0'].shape[0]
-        for tp in ASSESS_TIMEPOINTS:
-            tp_actual = tp if tp >= 0 else n_timepoints + tp
-            assess_cellpose_params(
-                zarr_store, TEST_ROW, TEST_WELL, TEST_FOV, model, OUTPUT_DIR,
-                diameters=ASSESS_DIAMETERS,
-                flow_thresholds=ASSESS_FLOW_THRESHOLDS,
-                timepoint=tp_actual,
-            )
-        print("\nExiting after Cellpose assessment. Check the saved PNGs, then set ASSESS_CELLPOSE = False.")
-        exit()
-    
     print("\nChecking GPU...")
     import torch
     USE_GPU = torch.cuda.is_available()
@@ -790,61 +691,10 @@ if __name__ == "__main__":
         print(f"✓ GPU: {torch.cuda.get_device_name(0)}")
     else:
         print("✗ No GPU - using CPU")
-    
+
     print("\nInitializing Cellpose...")
     model = models.CellposeModel(gpu=USE_GPU, model_type=CELLPOSE_MODEL)
-    
-    if SINGLE_FOV_MODE:
-        # ---- SLURM array path: process exactly one FOV then exit ----
-        process_fov(zarr_store, _row, _well, _fov, model, OUTPUT_DIR)
-        print(f"\nDone! Results in {OUTPUT_DIR / f'well_{_row}{_well}_FOV{_fov}'}")
 
-    elif PROCESS_SINGLE_FOV_FIRST:
-        dapi_mips, gfp_mips, tracked_masks, df = process_fov(
-            zarr_store, TEST_ROW, TEST_WELL, TEST_FOV, model, OUTPUT_DIR
-        )
-
-        print("\nOpening napari...")
-        import napari  # imported here so headless runs never need it
-        viewer = napari.Viewer()
-
-        viewer.add_image(dapi_mips, name='DAPI MIP', colormap='blue', blending='additive',
-                        contrast_limits=[np.percentile(dapi_mips, 1), np.percentile(dapi_mips, 99)])
-        viewer.add_image(gfp_mips, name='GFP MIP', colormap='green', blending='additive',
-                        contrast_limits=[np.percentile(gfp_mips, 1), np.percentile(gfp_mips, 99)])
-        viewer.add_labels(tracked_masks, name='Tracked Nuclei')
-
-        napari.run()
-
-    else:
-        # ---- Local batch path: process all wells/FOVs sequentially ----
-        all_measurements = []
-        all_stats = []
-
-        rows = ROWS if ROWS is not None else get_rows(zarr_store)
-        for row in rows:
-            wells = WELLS if WELLS is not None else get_wells(zarr_store, row)
-            for well in wells:
-                fovs = get_fovs(zarr_store, row, well)
-                if not fovs:
-                    print(f"  Skipping {row}{well} — no FOVs found in zarr store")
-                    continue
-                print(f"  {row}{well}: {len(fovs)} FOVs detected {fovs}")
-                for fov in fovs:
-                    try:
-                        _, _, _, df = process_fov(zarr_store, row, well, fov, model, OUTPUT_DIR)
-                        if len(df) > 0:
-                            all_measurements.append(df)
-                            stats = pd.read_csv(OUTPUT_DIR / f"well_{row}{well}_FOV{fov}" / "track_summary_stats.csv")
-                            all_stats.append(stats)
-                    except Exception as e:
-                        print(f"\nERROR: Well {row}/{well}, FOV {fov}: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        continue
-
-        if all_measurements:
-            pd.concat(all_measurements, ignore_index=True).to_csv(OUTPUT_DIR / "all_measurements.csv", index=False)
-            pd.concat(all_stats, ignore_index=True).to_csv(OUTPUT_DIR / "all_track_stats.csv", index=False)
-
-        print(f"\nDone! Results in {OUTPUT_DIR}")
+    # ---- SLURM array path: process exactly one FOV then exit ----
+    process_fov(zarr_store, _row, _well, _fov, model, OUTPUT_DIR)
+    print(f"\nDone! Results in {OUTPUT_DIR / f'well_{_row}{_well}_FOV{_fov}'}")

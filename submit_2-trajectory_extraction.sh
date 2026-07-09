@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# submit_array_2.sh  —  SLURM array launcher for script 2 (mNG trajectory analysis)
+# submit_2-trajectory_extraction.sh  —  SLURM array launcher for script 2 (mNG trajectory analysis)
 #
 # One job per well. No GPU needed — CPU-only data analysis.
 #
 # Usage:
-#   bash submit_array_2.sh              # submit all wells
-#   bash submit_array_2.sh --dry-run    # print tasks without submitting
+#   bash submit_2-trajectory_extraction.sh              # submit all wells
+#   bash submit_2-trajectory_extraction.sh --dry-run    # print tasks without submitting
 # =============================================================================
 
 set -euo pipefail
@@ -24,12 +24,19 @@ PARTITION="cpu"          # CPU partition (no GPU needed)
 CPUS=4
 MEM="32G"
 TIME="02:00:00"
-CONDA_ENV="/path/to/your/conda_env"
+CONDA_ENV="vswitch_analysis"
 
 # ---- script 2 arguments (passed through to every job) ----
-EXTRA_ARGS="--n-sd 10"    # stdev threshold (already the default, but explicit here)
-# Add any other flags here, e.g.:
-# EXTRA_ARGS="--n-sd 3 --min-duration 30 --save-svg"
+# Activation is called on the mNG/BFP ratio using a FIXED threshold derived from
+# an uninfected control well (mean + n_sd × SD). This is the only thresholding
+# mode in the script.
+#
+# CONTROL_MAP declares which control well is used for which target wells, as
+# CONTROL:TARGET1,TARGET2,... entries. Edit this to match your plate layout.
+# Here B1 is the control for the B wells and C1 for the C wells.
+NSD=3
+CONTROL_MAP="B1:B1,B2,B3 C1:C1,C2,C3"
+EXTRA_ARGS="--n-sd ${NSD} --control-map ${CONTROL_MAP}"
 
 DRY_RUN=false
 if [[ "${1:-}" == "--dry-run" ]]; then
@@ -63,6 +70,7 @@ sbatch <<EOF
 #SBATCH --output=${LOG_DIR}/job_%A_task_%a.out
 #SBATCH --error=${LOG_DIR}/job_%A_task_%a.err
 
+module load anaconda
 source "\$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
 
@@ -72,6 +80,8 @@ WELL=\${WELLS[\${SLURM_ARRAY_TASK_ID}]}
 echo "Task \${SLURM_ARRAY_TASK_ID}: well=\${WELL}"
 echo "Node: \$(hostname)"
 
+# --control-map assigns the control well per target; the script resolves which
+# control applies to \${WELL}.
 python "${MAIN_SCRIPT}" --well "\${WELL}" ${EXTRA_ARGS}
 EOF
 

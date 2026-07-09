@@ -22,11 +22,23 @@ The reporter uses a split-mNG system in which reconstitution of mNG fluorescence
 
 ## Requirements
 
-Python 3.9+ is recommended. Install dependencies with:
+Python 3.9+ is recommended. Create a dedicated environment named `vswitch_analysis`,
+activate it, then install the dependencies into it:
 
 ```bash
+# Create the environment (conda)
+conda create -n vswitch_analysis python=3.10
+
+# Activate it — do this BEFORE installing so packages land in the env
+conda activate vswitch_analysis
+
+# Install dependencies
 pip install -r requirements.txt
 ```
+
+You must activate the environment (`conda activate vswitch_analysis`) in every new
+shell before running any script — including inside SLURM batch jobs, which do not
+inherit your interactive shell's setup.
 
 Scripts 1 runs on GPU (tested on NVIDIA A100 via SLURM). Scripts 2 and 3 run on CPU and can be executed locally or on HPC.
 
@@ -44,13 +56,17 @@ python 1-segmentation_tracking.py \
     --row <row> --well <well> --fov <fov> \
     --output-dir /path/to/script1/output/
 
-# Submit as SLURM array (edit the paths and SLURM settings inside
-# submit_array.sh, and ZARR_PATH/OUTPUT_DIR inside 1-segmentation_tracking.py, first)
-bash submit_array.sh
+# Submit as SLURM array (edit ZARR_PATH, CONDA_ENV, and the SLURM settings at
+# the top of submit_1-segmentation_tracking.sh first). The launcher loads conda and activates the
+# environment itself, so no manual activation is needed.
+bash submit_1-segmentation_tracking.sh              # generate FOV list + submit
+bash submit_1-segmentation_tracking.sh --dry-run    # generate list only, print it, don't submit
 ```
 
-Rows, wells, and FOVs are auto-detected from the zarr store. `generate_fov_list.py`
-walks the store automatically; pass `--rows`/`--wells` to restrict to a subset.
+Rows, wells, and FOVs are auto-detected from the zarr store. `submit_1-segmentation_tracking.sh`
+first runs `1-segmentation_tracking.py --list-fovs`, which walks the store and
+writes `fov_list.txt` (one `row well fov` per line); the SLURM array then indexes
+into that file. Pass `--rows`/`--wells` to `--list-fovs` to restrict to a subset.
 The local batch path in script 1 auto-detects too (set the `ROWS`/`WELLS`
 constants to a list only if you want to process a subset).
 
@@ -93,10 +109,10 @@ Input images are expected as a zarr store with the layout:
 store[row][well][fov]['0']  →  shape (T, C, Z, Y, X)
 ```
 
-Channel indices are configured per script: script 1 uses the
+Channel indices are read from the store by script 1 only, via the
 `PHASE_CHANNEL_IDX` / `DAPI_CHANNEL_IDX` / `GFP_CHANNEL_IDX` constants at the top
-of the file, and script 3 accepts `--nucleus-channel`, `--mng-channel`, and
-`--bfp-channel` flags (run `python 3-activation_analysis.py --help` for defaults).
+of the file. Scripts 2 and 3 operate on script 1's per-FOV outputs (tracking
+CSVs and saved MIP arrays), so they do not take channel arguments.
 
 ---
 

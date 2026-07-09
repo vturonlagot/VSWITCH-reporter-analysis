@@ -9,16 +9,15 @@ tqdm
 zarr
 
 # Segmentation
-# Pinned to <4: script 1 uses the Cellpose 3.x API
-# (CellposeModel(model_type=...)), which changed in Cellpose 4 (Cellpose-SAM).
-cellpose>=3.0,<4.0
+# Pinned to 4.0.7 (Cellpose-SAM) to match the environment used for the paper.
+cellpose==4.0.7
 # GPU backend for Cellpose (installed automatically by cellpose, listed for clarity)
 torch
 
 # Tracking
 # ultrack requires a MILP solver. By default it uses Gurobi, which needs a
 # license (free academic licenses are available). Set GRB_LICENSE_FILE to point
-# at your gurobi.lic — see submit_array.sh for the SLURM example.
+# at your gurobi.lic — see submit_1-segmentation_tracking.sh for the SLURM example.
 ultrack
 
 # Visualization (script 1 only — imported lazily so headless HPC runs do not need it)

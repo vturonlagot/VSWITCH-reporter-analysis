@@ -16,10 +16,20 @@ COMMAND-LINE OPTIONS
 Input/Output:
     -i, --input PATH          Input directory containing ultrack output
     -o, --output PATH         Output directory for results
-    -w, --well WELL           Well to analyze: B3, B4, C3, C4, or 'all' (default: C2)
+    -w, --well WELL [WELL ...] Well(s) to analyze: B1, B2, B3, C1, C2, C3, or
+                              'all' (default: B1)
+
+Activation Threshold (control-well fixed threshold on mNG/BFP ratio):
+    --n-sd VALUE              SD multiplier for the control-well fixed threshold,
+                              control_mean + n_sd*SD (default: 3.0)
+    --control-well WELL       Uninfected control well used to derive the threshold
+                              (default: B2)
+    --control-map C:T1,T2 ... Per-target control assignment, e.g.
+                              --control-map B1:B1,B2,B3 C1:C1,C2,C3 makes B1 the
+                              control for the B wells and C1 for the C wells
 
 Activation Detection:
-    -t, --threshold VALUE     mNG intensity threshold for activation (default: 35)
+    -t, --threshold VALUE     mNG intensity threshold for activation (default: 40)
     --min-duration N          Minimum track duration in frames (default: 30)
     --sustained / --no-sustained
                               Require sustained activation above threshold (default: True)
@@ -27,6 +37,12 @@ Activation Detection:
     --min-pre-activation-frames N
                               Minimum frames before activation to include track (default: 0)
     --bin-size N              Bin size for grouping activation times (default: 5)
+
+Timepoint Filtering:
+    --start-timepoint N       First frame to include (default: None = from 0)
+    --end-timepoint N         Last frame to include (default: 48)
+    --min-activation-timepoint N
+                              Ignore activations before this frame (default: 0)
 
 Quality Filtering:
     --filter-quality / --no-filter-quality
@@ -46,11 +62,6 @@ FOV Exclusion:
 Figure Output:
     --save-pdf                Save figures in PDF format (in addition to PNG)
     --save-svg                Save figures in SVG format (in addition to PNG)
-    --save-individual         Save individual figures (not just panels)
-    --no-style                Disable publication style formatting
-
-Exploration:
-    --explore-thresholds      Run threshold exploration analysis
 
 EXAMPLES
 ========
@@ -60,17 +71,8 @@ python script.py --well C3
 # Custom threshold with SVG output for publication (panels only)
 python script.py --well C2 --threshold 40 --save-svg
 
-# Save individual figures for publication (PNG + SVG)
-python script.py --well C2 --save-individual --save-svg
-
-# All formats: panels + individual figures in PNG, PDF, and SVG
-python script.py --well C2 --save-individual --save-svg --save-pdf
-
 # Analyze all wells, excluding problematic FOVs
 python script.py --well all --exclude-fovs C2:3,5 C3:1
-
-# Explore different thresholds to find optimal value
-python script.py --well C2 --explore-thresholds
 
 # Strict quality filtering
 python script.py --well C2 --max-position-jump 30 --max-intensity-jump 1.5
@@ -84,14 +86,6 @@ Figures - Panels (in output_dir/figures/panels/):
     - well_XX_activation_analysis_panel.png   6-panel analysis overview
     - well_XX_trajectories_by_bin_panel.png   Trajectories grouped by activation time
     - well_XX_summary_panel.png               3-panel publication summary
-
-Figures - Individual (in output_dir/figures/individual/, requires --save-individual):
-    - well_XX_activation_histogram.png        Activation time distribution
-    - well_XX_cumulative_activation.png       Cumulative activation curve
-    - well_XX_example_trajectories.png        Example mNG trajectories
-    - well_XX_max_intensity_distribution.png  Max intensity by activation status
-    - well_XX_activation_by_fov.png           Activation percentage per FOV
-    - well_XX_population_dynamics.png         Population mean ± SD over time
 
 Data files (in output_dir/):
     - well_XX_all_tracks.csv                  All analyzed tracks with activation status
@@ -113,11 +107,6 @@ import argparse
 import time
 import warnings
 warnings.filterwarnings('ignore')
-try:
-    import napari
-    NAPARI_AVAILABLE = True
-except ImportError:
-    NAPARI_AVAILABLE = False
 try:
     from skimage.measure import regionprops_table
     SKIMAGE_AVAILABLE = True
@@ -187,7 +176,7 @@ DEFAULTS = {
     'bin_size': 5,
     'min_pre_activation_frames': 0,
     'start_timepoint': None,  # NEW
-    'end_timepoint': 96,    # NEW
+    'end_timepoint': 48,    # NEW
     'min_activation_timepoint': 0,
 }
 
@@ -202,8 +191,8 @@ def parse_args():
 Examples:
   python script.py --well B2 --threshold 800
   python script.py --well C3
-  python script.py --well all --explore-thresholds
-  
+  python script.py --well all
+
 Available wells: B2, B3, C2, C3 (or 'all' for all wells)
         """
     )
@@ -226,7 +215,8 @@ Available wells: B2, B3, C2, C3 (or 'all' for all wells)
     parser.add_argument('--min-activation-timepoint', type=int, default=DEFAULTS['min_activation_timepoint'],
                         help='Minimum timepoint for valid activation (cells activating earlier are excluded, default: 0)')
     parser.add_argument('--n-sd', type=float, default=3.0,
-                        help='Number of SDs above baseline mean used as per-cell activation threshold (default: 3)')
+                        help='Number of SDs above the control-well mean mNG/BFP ratio used as '
+                             'the fixed activation threshold (default: 3)')
     parser.add_argument('--filter-quality', action='store_true', default=True)
     parser.add_argument('--no-filter-quality', dest='filter_quality', action='store_false')
     parser.add_argument('--max-position-jump', type=float, default=50)
@@ -235,30 +225,16 @@ Available wells: B2, B3, C2, C3 (or 'all' for all wells)
     parser.add_argument('--max-area-cv', type=float, default=0.5)
     parser.add_argument('--save-pdf', action='store_true')
     parser.add_argument('--save-svg', action='store_true')
-    parser.add_argument('--save-individual', action='store_true', help='Save individual figures (not just panels)')
-    parser.add_argument('--no-style', action='store_true')
-    parser.add_argument('--explore-thresholds', action='store_true')
-    parser.add_argument('--explore-n-sd', action='store_true',
-                        help='Sweep n_sd values across all wells to calibrate activation threshold')
-    parser.add_argument('--n-sd-values', nargs='+', type=float, default=None,
-                        help='n_sd values to test (default: 1 2 3 4 5 6 7 8 10)')
-    parser.add_argument('--drift-correction', choices=['none', 'population', 'control'],
-                        default='none',
-                        help='Correct systematic fluorescence drift over time: '
-                             '"population" subtracts per-timepoint median within each well '
-                             '(assumes low MOI); '
-                             '"control" subtracts the drift curve from the uninfected control well '
-                             '(see --control-well). Default: none')
     parser.add_argument('--control-well', type=str, default='B2',
-                        help='Uninfected control well used for drift correction when '
-                             '--drift-correction=control (default: B2)')
-    parser.add_argument('--control-threshold', action='store_true', default=False,
-                        help='Derive activation threshold from the full signal distribution '
-                             'of the uninfected control well (mean + n_sd × SD across all '
-                             'cells and timepoints) instead of per-cell baseline thresholds')
+                        help='Default uninfected control well used to compute the fixed '
+                             'activation threshold (mean + n_sd × SD of the mNG/BFP ratio). '
+                             'Used for any well not covered by --control-map (default: B2)')
+    parser.add_argument('--control-map', nargs='+', default=None,
+                        help='Explicit control-well assignments as CONTROL:TARGET1,TARGET2,... '
+                             'entries, e.g. --control-map B1:B1,B2,B3 C1:C1,C2,C3 makes B1 the '
+                             'control for the B wells and C1 the control for the C wells. Wells '
+                             'not listed fall back to --control-well.')
     parser.add_argument('--exclude-fovs', nargs='+', default=None)
-    parser.add_argument('--view-napari', action='store_true')
-    parser.add_argument('--fov', type=int, default=0)
 
     return parser.parse_args()
 
@@ -286,6 +262,29 @@ def parse_exclude_fovs(exclude_arg, current_well):
         else:
             excluded.add(int(item))
     return excluded
+
+
+def parse_control_map(entries):
+    """Parse CONTROL:TARGET1,TARGET2,... entries into a {target: control} dict.
+
+    e.g. ['B1:B1,B2,B3', 'C1:C1,C2,C3'] -> {'B1':'B1','B2':'B1','B3':'B1',
+    'C1':'C1','C2':'C1','C3':'C1'}. Well names are normalized to upper case.
+    """
+    mapping = {}
+    if not entries:
+        return mapping
+    for entry in entries:
+        if ':' not in entry:
+            raise ValueError(
+                f"Invalid --control-map entry '{entry}'. Expected CONTROL:TARGET1,TARGET2,..."
+            )
+        control_part, targets_part = entry.split(':', 1)
+        control = parse_well(control_part)[2]
+        for tgt in targets_part.split(','):
+            tgt = tgt.strip()
+            if tgt:
+                mapping[parse_well(tgt)[2]] = control
+    return mapping
 
 
 def setup_paths(args):
@@ -579,69 +578,28 @@ def filter_tracks_by_quality(df_all, df_quality, max_position_jump=50,
     return df_filtered, df_quality_filtered, filter_stats
 
 
-def correct_drift(df_all, signal_col, method='population', df_control=None):
-    """
-    Subtract per-timepoint drift from single-cell trajectories.
-
-    Parameters
-    ----------
-    method : 'population' or 'control'
-        'population' — subtract the per-timepoint median of df_all itself.
-                       Assumes most cells are NOT activating (robust for low MOI).
-        'control'    — subtract the per-timepoint median of df_control (e.g. B2
-                       uninfected well). Gold standard when a negative control exists.
-    df_control : DataFrame
-        Required when method='control'. Must contain 'timepoint' and signal_col.
-
-    The correction preserves the absolute signal level at t=0 (only relative drift
-    over time is removed).
-    """
-    if signal_col not in df_all.columns:
-        print(f"WARNING: drift correction skipped — '{signal_col}' not in columns")
-        return df_all
-
-    if method == 'population':
-        drift = df_all.groupby('timepoint')[signal_col].median()
-        print(f"  Drift correction (population median): "
-              f"t0={drift.iloc[0]:.4g}, t_end={drift.iloc[-1]:.4g}, "
-              f"total drift={drift.iloc[-1]-drift.iloc[0]:.4g}")
-    elif method == 'control':
-        if df_control is None or signal_col not in df_control.columns:
-            print("WARNING: drift correction method='control' requires df_control — skipping")
-            return df_all
-        drift = df_control.groupby('timepoint')[signal_col].median()
-        print(f"  Drift correction (control well): "
-              f"t0={drift.iloc[0]:.4g}, t_end={drift.iloc[-1]:.4g}, "
-              f"total drift={drift.iloc[-1]-drift.iloc[0]:.4g}")
-    else:
-        return df_all
-
-    baseline = drift.iloc[0]
-    correction = df_all['timepoint'].map(drift) - baseline  # zero at t=0
-    df_corrected = df_all.copy()
-    df_corrected[signal_col] = df_corrected[signal_col] - correction
-    return df_corrected
-
-
 def analyze_activation(df_all, df_tracks, threshold, min_duration,
                        require_sustained=True, sustained_window=3,
                        min_pre_activation_frames=2, min_activation_timepoint=0,
-                       n_baseline_frames=3, n_sd=3, signal_col='mean_intensity',
+                       signal_col='mean_intensity',
                        fixed_threshold=None, verbose=True):
-    use_ratio = (signal_col == 'mng_bfp_ratio' and signal_col in df_all.columns
-                 and fixed_threshold is None)
+    use_ratio = (signal_col == 'mng_bfp_ratio' and signal_col in df_all.columns)
+    if use_ratio and fixed_threshold is None:
+        raise ValueError(
+            "Ratio-based activation requires a control-well fixed threshold "
+            "(fixed_threshold). Per-cell adaptive thresholds are not supported."
+        )
     if verbose:
         print(f"\n{'='*60}")
         if use_ratio:
             print(f"Analyzing activation using mNG/BFP ratio")
-            print(f"  Per-cell threshold: baseline mean + {n_sd} × SD (first {n_baseline_frames} frames)")
+            print(f"  Fixed control-well threshold: {fixed_threshold:.4f}")
         else:
             print(f"Analyzing activation (threshold={threshold}, min_activation_t={min_activation_timepoint})")
         print(f"{'='*60}")
 
     results = []
     n_insufficient_pre_tracking = 0
-    n_no_baseline = 0
 
     for track_id in df_all['unique_track_id'].unique():
         track_data = df_all[df_all['unique_track_id'] == track_id].sort_values('timepoint')
@@ -653,38 +611,13 @@ def analyze_activation(df_all, df_tracks, threshold, min_duration,
         timepoints = track_data['timepoint'].values
         start_timepoint = timepoints[0]
 
-        # --- Determine per-cell or global threshold ---
-        if fixed_threshold is not None:
+        # --- Determine activation threshold (control-well fixed) ---
+        if use_ratio:
             cell_threshold = fixed_threshold
-            signal_values = track_data[signal_col].values
-        elif use_ratio:
-            baseline_vals = track_data.head(n_baseline_frames)[signal_col].dropna()
-            if len(baseline_vals) >= 2:
-                cell_threshold = baseline_vals.mean() + n_sd * baseline_vals.std()
-            elif len(baseline_vals) == 1:
-                cell_threshold = baseline_vals.iloc[0]
-            else:
-                cell_threshold = np.nan
-                n_no_baseline += 1
             signal_values = track_data[signal_col].values
         else:
             cell_threshold = threshold
             signal_values = track_data['mean_intensity'].values
-
-        if np.isnan(cell_threshold):
-            results.append({
-                'unique_track_id': track_id, 'fov': fov,
-                'track_duration': len(track_data),
-                'start_timepoint': start_timepoint, 'end_timepoint': timepoints[-1],
-                'mean_intensity': track_data['mean_intensity'].mean(),
-                'max_intensity': track_data['mean_intensity'].max(),
-                'min_intensity': track_data['mean_intensity'].min(),
-                'activation_timepoint': None, 'pre_activation_frames': None,
-                'insufficient_pre_tracking': False, 'too_early_activation': False,
-                'had_early_high_signal': False, 'activates': False,
-                'activation_threshold': np.nan,
-            })
-            continue
 
         above_threshold = signal_values >= cell_threshold
         activation_timepoint = None
@@ -743,13 +676,10 @@ def analyze_activation(df_all, df_tracks, threshold, min_duration,
         print(f"  Activating: {len(df_activating)} ({100*len(df_activating)/len(df_activation):.1f}%)")
         if n_insufficient_pre_tracking > 0:
             print(f"  Excluded (insufficient pre-tracking): {n_insufficient_pre_tracking}")
-        if use_ratio and n_no_baseline > 0:
-            print(f"  Skipped (no baseline data): {n_no_baseline}")
         if len(df_activating) > 0:
             print(f"  Median activation time: {df_activating['activation_timepoint'].median():.1f}")
         if use_ratio and len(df_activation) > 0:
-            median_thresh = df_activation['activation_threshold'].median()
-            print(f"  Median per-cell threshold: {median_thresh:.4f}")
+            print(f"  Fixed control-well threshold: {fixed_threshold:.4f}")
 
     return df_activation, df_activating, df_non_activating
 
@@ -978,151 +908,6 @@ def calculate_activation_windows(df_activating, df_activation, output_dir, well,
     return results
 
 
-def explore_thresholds(df_all, df_tracks, min_duration, min_pre_activation_frames, 
-                       output_dir, save_pdf=False, save_svg=False):
-    print("\n" + "="*60)
-    print("THRESHOLD EXPLORATION")
-    print("="*60)
-    
-    thresholds = np.percentile(df_all['mean_intensity'], [50, 60, 70, 75, 80, 85, 90, 95])
-    thresholds = np.unique(np.round(thresholds, -1))
-    
-    results = []
-    for thresh in thresholds:
-        _, df_act, df_non = analyze_activation(
-            df_all, df_tracks, thresh, min_duration, True, 3, 
-            min_pre_activation_frames, verbose=False
-        )
-        n_act, n_non = len(df_act), len(df_non)
-        pct = 100 * n_act / (n_act + n_non) if (n_act + n_non) > 0 else 0
-        median_t = df_act['activation_timepoint'].median() if n_act > 0 else np.nan
-        print(f"Threshold {thresh:.0f}: {n_act} activating ({pct:.1f}%), median t={median_t:.1f}")
-        results.append({'threshold': thresh, 'n_activating': n_act, 'pct': pct, 'median_t': median_t})
-    
-    res_df = pd.DataFrame(results)
-    safe_save_csv(res_df, output_dir / "threshold_exploration.csv")
-    
-    fig, axes = plt.subplots(1, 3, figsize=FIGURE_SIZES['panel_1x3'])
-    axes[0].hist(df_all['mean_intensity'], bins=80, color=COLORS['activating'], alpha=0.7)
-    axes[0].set_xlabel('Mean mNG Intensity')
-    axes[0].set_ylabel('Count')
-    axes[1].plot(res_df['threshold'], res_df['pct'], 'o-', color=COLORS['median'])
-    axes[1].set_xlabel('Threshold')
-    axes[1].set_ylabel('% Activating')
-    axes[2].plot(res_df['threshold'], res_df['median_t'], 'o-', color=COLORS['highlight'])
-    axes[2].set_xlabel('Threshold')
-    axes[2].set_ylabel('Median activation time')
-    plt.tight_layout()
-    save_figure(fig, output_dir, "threshold_exploration_panel", save_pdf, save_svg, subdir="panels")
-
-
-def explore_n_sd(input_dir, output_dir, wells, threshold, min_duration,
-                 sustained, sustained_window, min_pre_activation_frames,
-                 start_timepoint=None, end_timepoint=None, min_activation_timepoint=0,
-                 filter_quality=True, max_position_jump=50, max_intensity_jump=2.0,
-                 max_gap_fraction=0.1, max_area_cv=0.5,
-                 n_sd_values=None, save_pdf=False, save_svg=False,
-                 drift_correction='none', control_well='B2'):
-    """
-    Sweep n_sd values across all wells to calibrate the per-cell activation threshold.
-
-    For each well and each n_sd, runs activation detection and records % activating cells.
-    Use the uninfected control well (e.g. B2) to find the n_sd where false positives
-    drop to ~0%, then pick the lowest n_sd satisfying that criterion.
-    """
-    if n_sd_values is None:
-        n_sd_values = [1, 2, 3, 4, 5, 6, 7, 8, 10]
-
-    print("\n" + "="*60)
-    print("N_SD THRESHOLD EXPLORATION")
-    print("="*60)
-
-    results = []
-
-    for well in wells:
-        print(f"\nLoading well {well}...")
-        try:
-            _, _, full_name = parse_well(well)
-            df_all_w, df_tracks_w = load_well_data(input_dir, well)
-            df_all_w, df_tracks_w = filter_timepoint_range(
-                df_all_w, df_tracks_w, start_timepoint, end_timepoint, verbose=False
-            )
-
-            df_bfp = extract_bfp_measurements(input_dir, well)
-            if df_bfp is not None:
-                df_all_w = merge_bfp_with_mng(df_all_w, df_bfp)
-                df_all_w = compute_mng_bfp_ratio(df_all_w)
-                signal_col = 'mng_bfp_ratio'
-            else:
-                signal_col = 'mean_intensity'
-
-            if drift_correction != 'none':
-                df_ctrl = None
-                if drift_correction == 'control':
-                    df_ctrl_raw, _ = load_well_data(input_dir, control_well)
-                    df_ctrl_raw, _ = filter_timepoint_range(df_ctrl_raw, df_ctrl_raw, start_timepoint, end_timepoint, verbose=False)
-                    df_ctrl_bfp = extract_bfp_measurements(input_dir, control_well)
-                    if df_ctrl_bfp is not None:
-                        df_ctrl_raw = merge_bfp_with_mng(df_ctrl_raw, df_ctrl_bfp)
-                        df_ctrl_raw = compute_mng_bfp_ratio(df_ctrl_raw)
-                    df_ctrl = df_ctrl_raw
-                df_all_w = correct_drift(df_all_w, signal_col, method=drift_correction, df_control=df_ctrl)
-
-            if filter_quality:
-                df_quality_w = compute_track_quality_metrics(df_all_w, verbose=False)
-                df_all_w, _, _ = filter_tracks_by_quality(
-                    df_all_w, df_quality_w, max_position_jump, max_intensity_jump,
-                    max_gap_fraction, max_area_cv
-                )
-
-            for n_sd in n_sd_values:
-                _, df_act, df_non = analyze_activation(
-                    df_all_w, df_tracks_w, threshold, min_duration,
-                    sustained, sustained_window,
-                    min_pre_activation_frames, min_activation_timepoint,
-                    n_sd=n_sd, signal_col=signal_col, verbose=False
-                )
-                n_act = len(df_act)
-                n_tot = n_act + len(df_non)
-                pct = 100 * n_act / n_tot if n_tot > 0 else 0
-                results.append({'well': full_name, 'n_sd': n_sd,
-                                 'n_activating': n_act, 'n_total': n_tot,
-                                 'pct_activating': pct})
-                print(f"  n_sd={n_sd:4.1f}: {n_act}/{n_tot} activating ({pct:.1f}%)")
-
-        except Exception as e:
-            print(f"  ERROR for well {well}: {e}")
-            import traceback; traceback.print_exc()
-            continue
-
-    if not results:
-        print("No results collected.")
-        return pd.DataFrame()
-
-    res_df = pd.DataFrame(results)
-    safe_save_csv(res_df, output_dir / "n_sd_exploration.csv")
-
-    # Plot
-    wells_found = res_df['well'].unique()
-    colors = plt.cm.tab10(np.linspace(0, 1, len(wells_found)))
-
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for well_name, color in zip(wells_found, colors):
-        wd = res_df[res_df['well'] == well_name].sort_values('n_sd')
-        ax.plot(wd['n_sd'], wd['pct_activating'], 'o-',
-                label=well_name, color=color, linewidth=2)
-    ax.set_xlabel('n_sd  (threshold = per-cell baseline + n_sd × SD)')
-    ax.set_ylabel('% Activating cells')
-    ax.set_title('Activation rate vs threshold stringency')
-    ax.legend(title='Well')
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    save_figure(fig, output_dir, "n_sd_exploration_panel", save_pdf, save_svg, subdir="panels")
-
-    print(f"\nResults saved to {output_dir / 'n_sd_exploration.csv'}")
-    return res_df
-
-
 def plot_activation_analysis(df_all, df_activation, df_activating, df_non_activating,
                              threshold, output_dir, well, save_pdf=False, save_svg=False,
                              signal_col='mean_intensity', suffix=''):
@@ -1318,239 +1103,6 @@ def plot_summary_figure(df_all, df_activating, df_non_activating, threshold, out
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     save_figure(fig, output_dir, f"well_{well}_summary_panel{suffix}", save_pdf, save_svg, subdir="panels")
 
-def plot_individual_figures(df_all, df_activation, df_activating, df_non_activating,
-                            threshold, output_dir, well, save_pdf=False, save_svg=False,
-                            signal_col='mean_intensity', suffix=''):
-    """Save each analysis plot as a separate publication-ready figure."""
-    
-    n_total = len(df_activation)
-    
-    # 1. Activation time histogram
-    fig, ax = plt.subplots(figsize=FIGURE_SIZES['single'])
-    if len(df_activating) > 0:
-        ax.hist(df_activating['activation_timepoint'], bins=np.arange(0, 50, 1),
-                color=COLORS['activating'], alpha=0.8, edgecolor='white')
-        median_val = df_activating['activation_timepoint'].median()
-        ax.axvline(median_val, color=COLORS['threshold'], linestyle='--', 
-                   label=f'Median: {median_val:.1f}')
-        ax.legend()
-    ax.set_xlabel('Activation Timepoint')
-    ax.set_ylabel('Count')
-    plt.tight_layout()
-    save_figure(fig, output_dir, f"well_{well}_activation_histogram", save_pdf, save_svg, subdir="individual")
-    
-    # 2. Cumulative activation curve
-    fig, ax = plt.subplots(figsize=FIGURE_SIZES['single'])
-    if len(df_activating) > 0:
-        timepoints = np.arange(0, 50)
-        cumulative_pct = [(df_activating['activation_timepoint'] <= t).sum() / n_total * 100 for t in timepoints]
-        ax.plot(timepoints, cumulative_pct, linewidth=2.5, color=COLORS['median'])
-        ax.fill_between(timepoints, 0, cumulative_pct, alpha=0.15, color=COLORS['median'])
-    ax.set_xlabel('Timepoint')
-    ax.set_ylabel('Cumulative % Activated')
-    ax.set_ylim(0, 105)
-    plt.tight_layout()
-    save_figure(fig, output_dir, f"well_{well}_cumulative_activation", save_pdf, save_svg, subdir="individual")
-    
-    # 3. Example trajectories
-    _ycol = signal_col if signal_col in df_all.columns else 'mean_intensity'
-    _ylabel = 'mNG/BFP ratio' if _ycol == 'mng_bfp_ratio' else 'Mean mNG Intensity'
-    fig, ax = plt.subplots(figsize=FIGURE_SIZES['single_wide'])
-    if len(df_activating) > 0:
-        for i, tid in enumerate(df_activating.sample(min(3, len(df_activating)))['unique_track_id']):
-            data = df_all[df_all['unique_track_id'] == tid].sort_values('timepoint')
-            ax.plot(data['timepoint'], data[_ycol], color=COLORS['activating'], alpha=0.6,
-                    label='Activating' if i == 0 else None)
-    if len(df_non_activating) > 0:
-        for i, tid in enumerate(df_non_activating.sample(min(3, len(df_non_activating)))['unique_track_id']):
-            data = df_all[df_all['unique_track_id'] == tid].sort_values('timepoint')
-            ax.plot(data['timepoint'], data[_ycol], color=COLORS['non_activating'], alpha=0.5,
-                    label='Non-activating' if i == 0 else None)
-    ax.axhline(threshold, color=COLORS['threshold'], linestyle='--', label=f'Median threshold={threshold:.4g}')
-    ax.set_xlabel('Timepoint')
-    ax.set_ylabel(_ylabel)
-    ax.legend(loc='upper left', fontsize=8)
-    plt.tight_layout()
-    save_figure(fig, output_dir, f"well_{well}_example_trajectories{suffix}", save_pdf, save_svg, subdir="individual")
-    
-    # 4. Max intensity distribution
-    fig, ax = plt.subplots(figsize=FIGURE_SIZES['single'])
-    if len(df_activating) > 0:
-        ax.hist(df_activating['max_intensity'], bins=40, alpha=0.7, label='Activating', color=COLORS['activating'])
-    if len(df_non_activating) > 0:
-        ax.hist(df_non_activating['max_intensity'], bins=40, alpha=0.5, label='Non-activating', color=COLORS['non_activating'])
-    ax.axvline(threshold, color=COLORS['threshold'], linestyle='--')
-    ax.set_xlabel('Maximum mNG Intensity')
-    ax.set_ylabel('Count')
-    ax.legend()
-    plt.tight_layout()
-    save_figure(fig, output_dir, f"well_{well}_max_intensity_distribution", save_pdf, save_svg, subdir="individual")
-    
-    # 5. Activation by FOV
-    fig, ax = plt.subplots(figsize=FIGURE_SIZES['single'])
-    fov_stats = df_activation.groupby('fov').agg({'activates': ['sum', 'count']}).reset_index()
-    fov_stats.columns = ['fov', 'n_act', 'n_total']
-    fov_stats['pct'] = 100 * fov_stats['n_act'] / fov_stats['n_total']
-    ax.bar(fov_stats['fov'].astype(str), fov_stats['pct'], color=COLORS['median'], alpha=0.8)
-    ax.axhline(fov_stats['pct'].mean(), color=COLORS['threshold'], linestyle='--')
-    ax.set_xlabel('FOV')
-    ax.set_ylabel('% Activating')
-    plt.tight_layout()
-    save_figure(fig, output_dir, f"well_{well}_activation_by_fov", save_pdf, save_svg, subdir="individual")
-    
-    # 6. Population dynamics (mean ± SD)
-    fig, ax = plt.subplots(figsize=FIGURE_SIZES['single_wide'])
-    if len(df_activating) > 0:
-        act_data = df_all[df_all['unique_track_id'].isin(df_activating['unique_track_id'])]
-        mean_act = act_data.groupby('timepoint')[_ycol].agg(['mean', 'std'])
-        ax.fill_between(mean_act.index, mean_act['mean'] - mean_act['std'],
-                        mean_act['mean'] + mean_act['std'], alpha=0.15, color=COLORS['activating'])
-        ax.plot(mean_act.index, mean_act['mean'], color=COLORS['activating'], linewidth=2.5, label='Activating')
-    if len(df_non_activating) > 0:
-        non_data = df_all[df_all['unique_track_id'].isin(df_non_activating['unique_track_id'])]
-        mean_non = non_data.groupby('timepoint')[_ycol].agg(['mean', 'std'])
-        ax.fill_between(mean_non.index, mean_non['mean'] - mean_non['std'],
-                        mean_non['mean'] + mean_non['std'], alpha=0.15, color=COLORS['non_activating'])
-        ax.plot(mean_non.index, mean_non['mean'], color=COLORS['non_activating'], linewidth=2, label='Non-activating')
-    ax.axhline(threshold, color=COLORS['threshold'], linestyle='--', alpha=0.6)
-    ax.set_xlabel('Timepoint')
-    ax.set_ylabel(_ylabel)
-    ax.legend(loc='upper left', fontsize=8)
-    plt.tight_layout()
-    save_figure(fig, output_dir, f"well_{well}_population_dynamics{suffix}", save_pdf, save_svg, subdir="individual")
-    
-    print(f"  Saved 6 individual figures to figures/individual/")
-
-def load_images_for_fov(input_dir, well, fov):
-    """Load image data for a specific FOV."""
-    _, _, full_name = parse_well(well)
-    fov_dir = Path(input_dir) / f"well_{full_name}_FOV{fov}"
-
-    images = {}
-
-    gfp_file = fov_dir / "gfp_mips.npy"
-    if gfp_file.exists():
-        images['gfp'] = np.load(gfp_file)
-        print(f"    mNG: {images['gfp'].shape}")
-
-    bfp_file = fov_dir / "dapi_mips.npy"
-    if bfp_file.exists():
-        images['bfp'] = np.load(bfp_file)
-        print(f"    BFP: {images['bfp'].shape}")
-
-    masks_file = fov_dir / "tracked_masks.npy"
-    if masks_file.exists():
-        images['masks'] = np.load(masks_file)
-        print(f"    Masks: {images['masks'].shape}")
-
-    return images
-
-
-def view_napari_browser(input_dir, well, df_all, df_activation, fov=0):
-    """Launch napari viewer to browse cells interactively."""
-    if not NAPARI_AVAILABLE:
-        print("ERROR: napari is not installed. Install with: pip install napari[all]")
-        return
-
-    _, _, full_name = parse_well(well)
-
-    print(f"\nLoading FOV {fov} for napari browsing...")
-    images = load_images_for_fov(input_dir, well, fov)
-
-    if not images:
-        print("ERROR: Could not load images")
-        return
-
-    viewer = napari.Viewer(title=f"Well {full_name} - FOV {fov}")
-
-    if 'gfp' in images:
-        viewer.add_image(images['gfp'], name='mNG', colormap='green',
-                         contrast_limits=[0, np.percentile(images['gfp'], 99.5)])
-
-    if 'bfp' in images:
-        viewer.add_image(images['bfp'], name='BFP', colormap='blue',
-                         contrast_limits=[0, np.percentile(images['bfp'], 99.5)],
-                         visible=False)
-
-    if 'masks' in images:
-        viewer.add_labels(images['masks'], name='Segmentation', opacity=0.3)
-
-    # Add points at activation timepoint for activating cells
-    fov_act = df_activation[(df_activation['fov'] == fov) & df_activation['activates']]
-    act_points = []
-    for _, row in fov_act.iterrows():
-        track_id = row['unique_track_id']
-        activation_t = row['activation_timepoint']
-        if activation_t is None or pd.isna(activation_t):
-            continue
-        track_data = df_all[(df_all['unique_track_id'] == track_id) &
-                            (df_all['timepoint'] == int(activation_t))]
-        if len(track_data) > 0:
-            cy = track_data.iloc[0]['centroid-0']
-            cx = track_data.iloc[0]['centroid-1']
-            act_points.append([int(activation_t), cy, cx])
-
-    if act_points:
-        viewer.add_points(np.array(act_points), name='Activating cells',
-                          face_color='lime', size=20, opacity=0.7)
-
-    # Add tracks for all measured cells in this FOV, colored to match their nucleus label
-    fov_meas = df_all[df_all['fov'] == fov]
-    fov_track_uids = fov_meas['unique_track_id'].unique()
-
-    if len(fov_track_uids) > 0:
-        local_ids = sorted(set(int(uid.split('_')[-1]) for uid in fov_track_uids))
-        n = len(local_ids)
-        id_to_rank = {lid: i for i, lid in enumerate(local_ids)}
-
-        tracks_data = []
-        rank_vals = []
-        for uid in fov_track_uids:
-            local_id = int(uid.split('_')[-1])
-            rank_val = id_to_rank[local_id] / max(n - 1, 1)
-            cell_meas = fov_meas[fov_meas['unique_track_id'] == uid].sort_values('timepoint')
-            for _, row in cell_meas.iterrows():
-                tracks_data.append([local_id, int(row['timepoint']),
-                                    row['centroid-0'], row['centroid-1']])
-                rank_vals.append(rank_val)
-
-        if tracks_data:
-            tracks_array = np.array(tracks_data)
-            if 'masks' in images:
-                from napari.utils.colormaps import Colormap as NapariColormap, AVAILABLE_COLORMAPS
-                seg_layer = viewer.layers['Segmentation']
-                colors = [seg_layer.get_color(lid) for lid in local_ids]
-                controls = [i / max(n - 1, 1) for i in range(n)]
-                if n == 1:
-                    colors = [colors[0], colors[0]]
-                    controls = [0.0, 1.0]
-                track_cmap = NapariColormap(colors=colors, controls=controls,
-                                            name='label_match')
-                AVAILABLE_COLORMAPS['label_match'] = track_cmap
-                viewer.add_tracks(
-                    tracks_array,
-                    properties={'label_color': np.array(rank_vals)},
-                    color_by='label_color',
-                    colormap='label_match',
-                    name='Tracks',
-                    tail_width=3,
-                    tail_length=30,
-                )
-            else:
-                viewer.add_tracks(tracks_array, name='Tracks',
-                                  tail_width=3, tail_length=30)
-
-    print(f"\nNapari viewer launched with:")
-    print(f"  - mNG channel")
-    print(f"  - BFP channel (hidden by default)")
-    print(f"  - Segmentation masks")
-    print(f"  - Tracks colored to match nucleus labels ({len(fov_track_uids)} cells)")
-    print(f"  - Activating cell positions ({len(act_points)} cells)")
-    print(f"\nUse the time slider to navigate through timepoints.")
-
-    napari.run()
-
-
 def characterize_activation_kinetics(df_activation, df_all, signal_col='mng_bfp_ratio',
                                      n_baseline_frames=3):
     """
@@ -1665,8 +1217,8 @@ def run_analysis(input_dir, output_dir, well, threshold, min_duration,
                  n_sd=3.0,
                  filter_quality=True, max_position_jump=50, max_intensity_jump=2.0,
                  max_gap_fraction=0.1, max_area_cv=0.5, exclude_fovs=None,
-                 save_pdf=False, save_svg=False, save_individual=False,
-                 drift_correction='none', control_well='B2', control_threshold=False):
+                 save_pdf=False, save_svg=False,
+                 control_well='B2'):
     """Run analysis for a single well."""
 
     _, _, full_name = parse_well(well)
@@ -1675,7 +1227,7 @@ def run_analysis(input_dir, output_dir, well, threshold, min_duration,
 
     df_all, df_tracks = filter_timepoint_range(df_all, df_tracks, start_timepoint, end_timepoint)
 
-    # Extract BFP and compute per-cell mNG/BFP ratio for threshold calculation
+    # Extract BFP and compute the mNG/BFP ratio used for activation detection
     print("\nExtracting BFP measurements for ratio-based activation detection...")
     df_bfp = extract_bfp_measurements(input_dir, well, exclude_fovs)
     if df_bfp is not None:
@@ -1685,21 +1237,6 @@ def run_analysis(input_dir, output_dir, well, threshold, min_duration,
     else:
         print("WARNING: Falling back to raw mNG intensity with fixed threshold.")
         signal_col = 'mean_intensity'
-
-    # Drift correction
-    if drift_correction != 'none':
-        print(f"\nApplying drift correction (method={drift_correction})...")
-        df_control = None
-        if drift_correction == 'control':
-            print(f"  Loading control well {control_well}...")
-            df_ctrl_raw, _ = load_well_data(input_dir, control_well)
-            df_ctrl_raw, _ = filter_timepoint_range(df_ctrl_raw, df_ctrl_raw, start_timepoint, end_timepoint, verbose=False)
-            df_ctrl_bfp = extract_bfp_measurements(input_dir, control_well)
-            if df_ctrl_bfp is not None:
-                df_ctrl_raw = merge_bfp_with_mng(df_ctrl_raw, df_ctrl_bfp)
-                df_ctrl_raw = compute_mng_bfp_ratio(df_ctrl_raw)
-            df_control = df_ctrl_raw
-        df_all = correct_drift(df_all, signal_col, method=drift_correction, df_control=df_control)
 
     df_quality = compute_track_quality_metrics(df_all)
     safe_save_csv(df_quality, output_dir / f"well_{full_name}_track_quality.csv")
@@ -1711,27 +1248,31 @@ def run_analysis(input_dir, output_dir, well, threshold, min_duration,
             max_gap_fraction, max_area_cv
         )
 
-    # Compute population-level threshold from uninfected control well if requested
+    # Compute the population-level activation threshold from the uninfected
+    # control well (mean + n_sd × SD of the mNG/BFP ratio across all cells and
+    # timepoints). This control-well fixed threshold is the only supported mode.
     fixed_threshold = None
-    if control_threshold and signal_col == 'mng_bfp_ratio':
+    if signal_col == 'mng_bfp_ratio':
         print(f"\nComputing activation threshold from control well {control_well}...")
         df_ctrl_raw, _ = load_well_data(input_dir, control_well)
         df_ctrl_raw, _ = filter_timepoint_range(df_ctrl_raw, df_ctrl_raw, start_timepoint, end_timepoint, verbose=False)
         df_ctrl_bfp = extract_bfp_measurements(input_dir, control_well)
-        if df_ctrl_bfp is not None:
-            df_ctrl_raw = merge_bfp_with_mng(df_ctrl_raw, df_ctrl_bfp)
-            df_ctrl_raw = compute_mng_bfp_ratio(df_ctrl_raw)
-            ctrl_vals = df_ctrl_raw['mng_bfp_ratio'].dropna()
-            fixed_threshold = ctrl_vals.mean() + n_sd * ctrl_vals.std()
-            print(f"  Control distribution: mean={ctrl_vals.mean():.4f}, SD={ctrl_vals.std():.4f}")
-            print(f"  Fixed threshold (mean + {n_sd}×SD): {fixed_threshold:.4f}")
-        else:
-            print("  WARNING: No BFP data found for control well — falling back to per-cell threshold.")
+        if df_ctrl_bfp is None:
+            raise RuntimeError(
+                f"No BFP data for control well {control_well}; cannot compute the "
+                f"control-well activation threshold."
+            )
+        df_ctrl_raw = merge_bfp_with_mng(df_ctrl_raw, df_ctrl_bfp)
+        df_ctrl_raw = compute_mng_bfp_ratio(df_ctrl_raw)
+        ctrl_vals = df_ctrl_raw['mng_bfp_ratio'].dropna()
+        fixed_threshold = ctrl_vals.mean() + n_sd * ctrl_vals.std()
+        print(f"  Control distribution: mean={ctrl_vals.mean():.4f}, SD={ctrl_vals.std():.4f}")
+        print(f"  Fixed threshold (mean + {n_sd}×SD): {fixed_threshold:.4f}")
 
     df_activation, df_activating, df_non_activating = analyze_activation(
         df_all, df_tracks, threshold, min_duration, sustained, sustained_window,
         min_pre_activation_frames, min_activation_timepoint,
-        n_sd=n_sd, signal_col=signal_col, fixed_threshold=fixed_threshold,
+        signal_col=signal_col, fixed_threshold=fixed_threshold,
     )
 
     # Derive a single representative threshold value for plot annotations
@@ -1763,10 +1304,6 @@ def run_analysis(input_dir, output_dir, well, threshold, min_duration,
                               signal_col='mean_intensity')
     plot_summary_figure(df_all, df_activating, df_non_activating, threshold,
                         output_dir, full_name, save_pdf, save_svg, signal_col='mean_intensity')
-    if save_individual:
-        plot_individual_figures(df_all, df_activation, df_activating, df_non_activating,
-                                threshold, output_dir, full_name, save_pdf, save_svg,
-                                signal_col='mean_intensity')
 
     # Also generate mNG/BFP ratio plots when ratio data is available
     if signal_col == 'mng_bfp_ratio':
@@ -1779,11 +1316,7 @@ def run_analysis(input_dir, output_dir, well, threshold, min_duration,
         plot_summary_figure(df_all, df_activating, df_non_activating, plot_threshold,
                             output_dir, full_name, save_pdf, save_svg,
                             signal_col='mng_bfp_ratio', suffix='_ratio')
-        if save_individual:
-            plot_individual_figures(df_all, df_activation, df_activating, df_non_activating,
-                                    plot_threshold, output_dir, full_name, save_pdf, save_svg,
-                                    signal_col='mng_bfp_ratio', suffix='_ratio')
-    
+
     print("\nSaving data files...")
     safe_save_csv(df_activation, output_dir / f"well_{full_name}_all_tracks.csv")
     if len(df_activating_binned) > 0:
@@ -1794,8 +1327,9 @@ def run_analysis(input_dir, output_dir, well, threshold, min_duration,
         safe_label = str(bin_label).replace("-", "_")
         safe_save_csv(df_group, output_dir / f"well_{full_name}_traj_{safe_label}.csv")
     
-    return {
+    summary = {
         'well': full_name,
+        'control_well': control_well,
         'total_tracks': filter_stats['n_original'] if filter_stats else len(df_activation),
         'filtered': filter_stats['n_filtered'] if filter_stats else 0,
         'analyzed': len(df_activation),
@@ -1803,19 +1337,25 @@ def run_analysis(input_dir, output_dir, well, threshold, min_duration,
         'non_activating': len(df_non_activating),
         'pct_activating': 100 * len(df_activating) / len(df_activation) if len(df_activation) > 0 else 0,
         'median_activation_t': df_activating['activation_timepoint'].median() if len(df_activating) > 0 else None,
+        'activation_threshold': fixed_threshold,
         'threshold': threshold,
-        'start_timepoint': start_timepoint,  # NEW
-        'end_timepoint': end_timepoint,      # NEW
-        'min_activation_timepoint': min_activation_timepoint,  # NEW
+        'start_timepoint': start_timepoint,
+        'end_timepoint': end_timepoint,
+        'min_activation_timepoint': min_activation_timepoint,
     }
+
+    # Write a per-well summary file so concurrent per-well jobs don't clobber a
+    # single shared summary.csv (which is rebuilt from these — see __main__).
+    safe_save_csv(pd.DataFrame([summary]), output_dir / f"well_{full_name}_summary.csv")
+
+    return summary
 
 
 if __name__ == "__main__":
     args = parse_args()
-    
-    if not args.no_style:
-        setup_publication_style()
-    
+
+    setup_publication_style()
+
     print("="*70)
     print("OFF→ON REPORTER ANALYSIS (ultrack) - v4")
     print("="*70)
@@ -1840,52 +1380,15 @@ if __name__ == "__main__":
     else:
         wells = args.well
     
-    if args.explore_thresholds:
-        well_info = parse_well(wells[0])
-        exclude_fovs = parse_exclude_fovs(args.exclude_fovs, well_info[2])
-        df_all, df_tracks = load_well_data(input_dir, wells[0], exclude_fovs)
-        explore_thresholds(df_all, df_tracks, args.min_duration,
-                          args.min_pre_activation_frames, output_dir,
-                          args.save_pdf, args.save_svg)
-        exit()
-
-    if args.explore_n_sd:
-        explore_n_sd(
-            input_dir, output_dir, wells,
-            args.threshold, args.min_duration,
-            args.sustained, args.sustained_window,
-            args.min_pre_activation_frames,
-            args.start_timepoint, args.end_timepoint, args.min_activation_timepoint,
-            args.filter_quality,
-            args.max_position_jump, args.max_intensity_jump,
-            args.max_gap_fraction, args.max_area_cv,
-            n_sd_values=args.n_sd_values,
-            save_pdf=args.save_pdf, save_svg=args.save_svg,
-            drift_correction=args.drift_correction,
-            control_well=args.control_well,
-        )
-        exit()
-
-    if args.view_napari:
-        well_info = parse_well(wells[0])
-        _, _, full_name = well_info
-        exclude_fovs = parse_exclude_fovs(args.exclude_fovs, full_name)
-        print("\nVisualization mode - loading data...")
-        df_all, _ = load_well_data(input_dir, wells[0], exclude_fovs)
-        act_file = output_dir / f"well_{full_name}_all_tracks.csv"
-        if not act_file.exists():
-            print(f"ERROR: No activation data found at {act_file}")
-            print("Run the analysis first (without --view-napari) to generate the data.")
-            exit(1)
-        df_activation = pd.read_csv(act_file)
-        view_napari_browser(input_dir, wells[0], df_all, df_activation, fov=args.fov)
-        exit()
+    control_map = parse_control_map(args.control_map)
 
     summaries = []
     for well in wells:
         try:
             well_info = parse_well(well)
-            exclude_fovs = parse_exclude_fovs(args.exclude_fovs, well_info[2])
+            full_name = well_info[2]
+            exclude_fovs = parse_exclude_fovs(args.exclude_fovs, full_name)
+            control_well = control_map.get(full_name, args.control_well)
             summary = run_analysis(
                 input_dir, output_dir, well, args.threshold, args.min_duration,
                 args.sustained, args.sustained_window, args.bin_size,
@@ -1895,19 +1398,25 @@ if __name__ == "__main__":
                 args.filter_quality,
                 args.max_position_jump, args.max_intensity_jump,
                 args.max_gap_fraction, args.max_area_cv, exclude_fovs,
-                args.save_pdf, args.save_svg, args.save_individual,
-                drift_correction=args.drift_correction,
-                control_well=args.control_well,
-                control_threshold=args.control_threshold,
+                args.save_pdf, args.save_svg,
+                control_well=control_well,
             )
             summaries.append(summary)
         except Exception as e:
             print(f"\nERROR well {well}: {e}")
             import traceback
             traceback.print_exc()
-    
+
     if summaries:
-        df_summary = pd.DataFrame(summaries)
+        # Rebuild summary.csv from every per-well summary file present in the output
+        # directory. This keeps the combined summary complete even when wells are
+        # processed by separate (e.g. per-well SLURM array) jobs, where a plain
+        # overwrite would leave only the last well.
+        summary_files = sorted(output_dir.glob("well_*_summary.csv"))
+        df_summary = pd.concat(
+            [pd.read_csv(f) for f in summary_files], ignore_index=True
+        ) if summary_files else pd.DataFrame(summaries)
+        df_summary = df_summary.drop_duplicates(subset='well', keep='last').sort_values('well')
         safe_save_csv(df_summary, output_dir / "summary.csv")
         print("\n" + "="*70)
         print("COMPLETE")
