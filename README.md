@@ -81,6 +81,11 @@ python 2-trajectory_extraction.py \
     --input /path/to/script1/output/ \
     --output /path/to/script2/output/ \
     --well all          # 'all' auto-detects wells from script 1's output; or list them: B1 B2 C1
+
+# Submit as a SLURM array over wells (edit the paths, WELLS, and SLURM settings
+# at the top of submit_2-trajectory_extraction.sh first)
+bash submit_2-trajectory_extraction.sh              # submit all wells
+bash submit_2-trajectory_extraction.sh --dry-run    # print the tasks without submitting
 ```
 
 ### Script 3 — Activation analysis and figures
@@ -93,6 +98,11 @@ python 3-activation_analysis.py \
     --tracking-dir /path/to/script1/output/ \
     --output-dir /path/to/script3/output/ \
     --well all          # 'all' auto-detects wells; or list them: B1 B2 C1
+
+# Submit as a single SLURM job for the whole plate (edit the paths and SLURM
+# settings at the top of submit_3-activation_analysis.sh first)
+bash submit_3-activation_analysis.sh              # submit the analysis job
+bash submit_3-activation_analysis.sh --dry-run    # print the invocation without submitting
 ```
 
 Paths also have defaults defined in each script's `DEFAULTS` block / config
