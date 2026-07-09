@@ -56,7 +56,7 @@ python 1-segmentation_tracking.py \
     --row <row> --well <well> --fov <fov> \
     --output-dir /path/to/script1/output/
 
-# Submit as SLURM array (edit ZARR_PATH, CONDA_ENV, and the SLURM settings at
+# Submit as SLURM array (edit ZARR_PATH, OUTPUT_DIR, CONDA_ENV, and the SLURM settings at
 # the top of submit_1-segmentation_tracking.sh first). The launcher loads conda and activates the
 # environment itself, so no manual activation is needed.
 bash submit_1-segmentation_tracking.sh              # generate FOV list + submit
